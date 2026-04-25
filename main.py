@@ -41,6 +41,19 @@ async def get_jira_issue(issue_key: str) -> dict:
         return resp.json()
 
 
+def extract_comments(issue_data: dict) -> str:
+    comments = issue_data.get('fields', {}).get('comment', {}).get('comments', [])
+    if not comments:
+        return ''
+    lines = []
+    for c in comments:
+        author = c.get('author', {}).get('displayName', 'Neznamy')
+        body = extract_text_from_adf(c.get('body'))
+        if body.strip():
+            lines.append(f'[{author}]: {body.strip()}')
+    return '\n'.join(lines)
+
+
 async def update_ac_field(issue_key: str, ac_text: str) -> None:
     url = f'{JIRA_BASE_URL}/rest/api/3/issue/{issue_key}'
     payload = {
@@ -86,9 +99,12 @@ async def call_claude(system_prompt: str, user_prompt: str) -> str:
         return resp.json()['content'][0]['text']
 
 
-def build_user_prompt(summary: str, description: str, issue_key: str) -> str:
+def build_user_prompt(summary: str, description: str, issue_key: str, comments: str = '') -> str:
     desc_text = description or 'Popis neni k dispozici.'
-    return f'Vygeneruj akceptacni kriteria pro tento JIRA ticket:\n\nTicket: {issue_key}\nNazev: {summary}\n\nPopis:\n{desc_text}'
+    prompt = f'Vygeneruj akceptacni kriteria pro tento JIRA ticket:\n\nTicket: {issue_key}\nNazev: {summary}\n\nPopis:\n{desc_text}'
+    if comments:
+        prompt += f'\n\nKomentare z ticketu (obsahuji upresnovani a diskuze):\n{comments}'
+    return prompt
 
 
 def extract_text_from_adf(adf) -> str:
@@ -136,11 +152,12 @@ async def webhook(request: Request):
     desc_adf   = fields.get('description')
 
     description = extract_text_from_adf(desc_adf)
-    print(f'[AC] Generuji AK pro {issue_key} | summary: {summary[:50]}')
+    comments = extract_comments(issue_data)
+    print(f'[AC] Generuji AK pro {issue_key} | summary: {summary[:50]} | komentaru: {len(issue_data.get("fields", {}).get("comment", {}).get("comments", []))}')
 
     ac_text = await call_claude(
         system_prompt=SYSTEM_PROMPT,
-        user_prompt=build_user_prompt(summary, description, issue_key),
+        user_prompt=build_user_prompt(summary, description, issue_key, comments),
     )
 
     print(f'[AC] Vygenerovano {len(ac_text)} znaku')
