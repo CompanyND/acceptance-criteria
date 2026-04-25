@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 app = FastAPI()
 
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+DEBUG_RUN = os.environ.get('DEBUG_RUN', '').lower() == 'true'
 JIRA_BASE_URL     = os.environ.get('JIRA_BASE_URL', '').rstrip('/')
 JIRA_EMAIL        = os.environ.get('JIRA_EMAIL', '')
 JIRA_API_TOKEN    = os.environ.get('JIRA_API_TOKEN', '')
@@ -140,6 +141,7 @@ async def fetch_jira_attachments(issue_data: dict) -> list[dict]:
                 continue
             try:
                 resp = await client.get(url, auth=jira_auth(), timeout=15)
+                print(f'[JIRA] Stahovani prilohy {att.get("filename")}: HTTP {resp.status_code}')
                 if not resp.is_success:
                     continue
                 b64 = base64.standard_b64encode(resp.content).decode('utf-8')
@@ -218,6 +220,10 @@ async def webhook(request: Request):
     images = await fetch_jira_attachments(issue_data)
     n_comments = len(issue_data.get('fields', {}).get('comment', {}).get('comments', []))
     print(f'[AC] Generuji AK pro {issue_key} | summary: {summary[:50]} | komentaru: {n_comments} | obrazku: {len(images)}')
+
+    if DEBUG_RUN:
+        print(f'[DEBUG_RUN] Preskakuji Claude API')
+        return JSONResponse({'status': 'debug_run', 'issue_key': issue_key, 'images': len(images)})
 
     ac_text = await call_claude(
         system_prompt=SYSTEM_PROMPT,
