@@ -48,11 +48,17 @@ def extract_comments(issue_data: dict) -> str:
     if not comments:
         return ''
     lines = []
+    BOT_PREFIXES = ('🤖', '⚠️ AK byla pregenerovana', '⚠️ AK přegenerována')
     for c in comments:
         author = c.get('author', {}).get('displayName', 'Neznamy')
         body = extract_text_from_adf(c.get('body'))
-        if body.strip():
-            lines.append(f'[{author}]: {body.strip()}')
+        if not body.strip():
+            continue
+        # Preskoc komentare od bota — audit trail
+        if any(body.strip().startswith(p) for p in BOT_PREFIXES):
+            print(f'[AC] Preskakuji bot komentar od {author}')
+            continue
+        lines.append(f'[{author}]: {body.strip()}')
     return '\n'.join(lines)
 
 
@@ -76,6 +82,28 @@ async def update_ac_field(issue_key: str, ac_text: str) -> None:
         resp = await client.put(url, json=payload, auth=jira_auth(), timeout=15)
         resp.raise_for_status()
         print(f'[JIRA] AK zapisana do customfield_10207 na ticketu {issue_key}')
+
+
+async def post_jira_comment(issue_key: str, body: str) -> None:
+    url = f'{JIRA_BASE_URL}/rest/api/3/issue/{issue_key}/comment'
+    payload = {
+        'body': {
+            'type': 'doc',
+            'version': 1,
+            'content': [
+                {
+                    'type': 'paragraph',
+                    'content': [{'type': 'text', 'text': body}]
+                }
+            ]
+        }
+    }
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(url, json=payload, auth=jira_auth(), timeout=15)
+        if resp.is_success:
+            print(f'[JIRA] Komentar pridan do {issue_key}')
+        else:
+            print(f'[JIRA] Chyba pri pridavani komentare: {resp.status_code}')
 
 
 async def call_claude(system_prompt: str, user_prompt: str, images: list[dict] | None = None) -> str:
@@ -224,6 +252,15 @@ async def webhook(request: Request):
     if DEBUG_RUN:
         print(f'[DEBUG_RUN] Preskakuji Claude API')
         return JSONResponse({'status': 'debug_run', 'issue_key': issue_key, 'images': len(images)})
+
+    # Zkontroluj jestli AK uz existuji — pokud ano, pridej audit komentar
+    existing_ac = extract_text_from_adf(issue_data.get('fields', {}).get('customfield_10207'))
+    if existing_ac.strip():
+        from datetime import datetime
+        now = datetime.now().strftime('%d.%m.%Y %H:%M')
+        audit_msg = f'⚠️ AK byla pregenerovana uzivatelem {triggered_by} ({now}). Predchozi verze byla prepasana.'
+        await post_jira_comment(issue_key, audit_msg)
+        print(f'[AC] Audit komentar pridan — AK pregenerovana')
 
     ac_text = await call_claude(
         system_prompt=SYSTEM_PROMPT,
