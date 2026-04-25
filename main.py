@@ -197,8 +197,6 @@ async def webhook(request: Request):
         or payload.get('actor', {}).get('displayName')
         or 'neznamy'
     )
-    print(f'[Webhook] Prijat ticket: {issue_key} | {summary} | spustil: {triggered_by}')
-
     if not issue_key:
         issue_key = payload.get('issueKey', '') or payload.get('key', '')
         if not issue_key:
@@ -210,6 +208,8 @@ async def webhook(request: Request):
     fields     = issue_data.get('fields', {})
     summary    = fields.get('summary', '')
     desc_adf   = fields.get('description')
+
+    print(f'[Webhook] Ticket: {issue_key} | {summary} | spustil: {triggered_by}')
 
     description = extract_text_from_adf(desc_adf)
     comments = extract_comments(issue_data)
