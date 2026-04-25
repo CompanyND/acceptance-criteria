@@ -192,9 +192,9 @@ async def webhook(request: Request):
 
     # Kdo spustil automation
     triggered_by = (
-        payload.get('user', {}).get('displayName')
+        payload.get('triggeredBy')
+        or payload.get('user', {}).get('displayName')
         or payload.get('actor', {}).get('displayName')
-        or payload.get('triggeredBy', {}).get('displayName')
         or 'neznamy'
     )
     print(f'[Webhook] Prijat ticket: {issue_key} | {summary} | spustil: {triggered_by}')
