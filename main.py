@@ -140,7 +140,7 @@ async def fetch_jira_attachments(issue_data: dict) -> list[dict]:
             if not url:
                 continue
             try:
-                resp = await client.get(url, auth=jira_auth(), timeout=15)
+                resp = await client.get(url, auth=jira_auth(), timeout=15, follow_redirects=True)
                 print(f'[JIRA] Stahovani prilohy {att.get("filename")}: HTTP {resp.status_code}')
                 if not resp.is_success:
                     continue
