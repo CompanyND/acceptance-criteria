@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import json
+import base64
 import httpx
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -76,17 +77,34 @@ async def update_ac_field(issue_key: str, ac_text: str) -> None:
         print(f'[JIRA] AK zapisana do customfield_10207 na ticketu {issue_key}')
 
 
-async def call_claude(system_prompt: str, user_prompt: str) -> str:
+async def call_claude(system_prompt: str, user_prompt: str, images: list[dict] | None = None) -> str:
     headers = {
         'x-api-key': ANTHROPIC_API_KEY,
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
     }
+    # Sestaveni content bloku — nejdrive obrazky, pak text
+    content: list[dict] = []
+    for img in (images or []):
+        content.append({
+            'type': 'image',
+            'source': {
+                'type': 'base64',
+                'media_type': img['media_type'],
+                'data': img['data'],
+            }
+        })
+        content.append({
+            'type': 'text',
+            'text': f'[Priloha: {img["name"]}]'
+        })
+    content.append({'type': 'text', 'text': user_prompt})
+
     payload = {
         'model': 'claude-sonnet-4-20250514',
         'max_tokens': 2048,
         'system': system_prompt,
-        'messages': [{'role': 'user', 'content': user_prompt}],
+        'messages': [{'role': 'user', 'content': content}],
     }
     async with httpx.AsyncClient() as client:
         resp = await client.post(
@@ -97,6 +115,41 @@ async def call_claude(system_prompt: str, user_prompt: str) -> str:
         )
         resp.raise_for_status()
         return resp.json()['content'][0]['text']
+
+
+SUPPORTED_IMAGE_TYPES = {
+    'image/png': 'image/png',
+    'image/jpeg': 'image/jpeg',
+    'image/jpg': 'image/jpeg',
+    'image/gif': 'image/gif',
+    'image/webp': 'image/webp',
+}
+
+async def fetch_jira_attachments(issue_data: dict) -> list[dict]:
+    attachments = issue_data.get('fields', {}).get('attachment', [])
+    images = []
+    async with httpx.AsyncClient() as client:
+        for att in attachments:
+            mime = att.get('mimeType', '')
+            if mime not in SUPPORTED_IMAGE_TYPES:
+                continue
+            url = att.get('content', '')
+            if not url:
+                continue
+            try:
+                resp = await client.get(url, auth=jira_auth(), timeout=15)
+                if not resp.is_success:
+                    continue
+                b64 = base64.standard_b64encode(resp.content).decode('utf-8')
+                images.append({
+                    'media_type': SUPPORTED_IMAGE_TYPES[mime],
+                    'data': b64,
+                    'name': att.get('filename', ''),
+                })
+                print(f'[JIRA] Stazena priloha: {att.get("filename")} ({mime})')
+            except Exception as e:
+                print(f'[JIRA] Chyba pri stazeni prilohy {att.get("filename")}: {e}')
+    return images
 
 
 def build_user_prompt(summary: str, description: str, issue_key: str, comments: str = '') -> str:
@@ -137,7 +190,14 @@ async def webhook(request: Request):
     issue_key = issue.get('key', '')
     summary   = fields.get('summary', '')
 
-    print(f'[Webhook] Prijat ticket: {issue_key} | {summary}')
+    # Kdo spustil automation
+    triggered_by = (
+        payload.get('user', {}).get('displayName')
+        or payload.get('actor', {}).get('displayName')
+        or payload.get('triggeredBy', {}).get('displayName')
+        or 'neznamy'
+    )
+    print(f'[Webhook] Prijat ticket: {issue_key} | {summary} | spustil: {triggered_by}')
 
     if not issue_key:
         issue_key = payload.get('issueKey', '') or payload.get('key', '')
@@ -153,11 +213,14 @@ async def webhook(request: Request):
 
     description = extract_text_from_adf(desc_adf)
     comments = extract_comments(issue_data)
-    print(f'[AC] Generuji AK pro {issue_key} | summary: {summary[:50]} | komentaru: {len(issue_data.get("fields", {}).get("comment", {}).get("comments", []))}')
+    images = await fetch_jira_attachments(issue_data)
+    n_comments = len(issue_data.get('fields', {}).get('comment', {}).get('comments', []))
+    print(f'[AC] Generuji AK pro {issue_key} | summary: {summary[:50]} | komentaru: {n_comments} | obrazku: {len(images)}')
 
     ac_text = await call_claude(
         system_prompt=SYSTEM_PROMPT,
         user_prompt=build_user_prompt(summary, description, issue_key, comments),
+        images=images,
     )
 
     print(f'[AC] Vygenerovano {len(ac_text)} znaku')
