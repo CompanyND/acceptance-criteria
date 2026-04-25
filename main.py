@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 app = FastAPI()
 
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
-JIRA_BASE_URL     = os.environ.get('JIRA_BASE_URL', '')
+JIRA_BASE_URL     = os.environ.get('JIRA_BASE_URL', '').rstrip('/')
 JIRA_EMAIL        = os.environ.get('JIRA_EMAIL', '')
 JIRA_API_TOKEN    = os.environ.get('JIRA_API_TOKEN', '')
 
