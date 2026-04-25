@@ -127,11 +127,13 @@ SUPPORTED_IMAGE_TYPES = {
 
 async def fetch_jira_attachments(issue_data: dict) -> list[dict]:
     attachments = issue_data.get('fields', {}).get('attachment', [])
+    print(f'[JIRA] Prilohy celkem: {len(attachments)} | typy: {[a.get("mimeType") for a in attachments]}')
     images = []
     async with httpx.AsyncClient() as client:
         for att in attachments:
             mime = att.get('mimeType', '')
             if mime not in SUPPORTED_IMAGE_TYPES:
+                print(f'[JIRA] Preskakuji prilohu: {att.get("filename")} ({mime}) - nepodporovany typ')
                 continue
             url = att.get('content', '')
             if not url:
