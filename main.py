@@ -43,18 +43,31 @@ async def get_jira_issue(issue_key: str) -> dict:
         return resp.json()
 
 
+BOT_PREFIXES = ('🤖', '⚠️ AK byla pregenerovana', '⚠️ AK přegenerována')
+# Bereme komentare jen od realnych lidi. Atlassian pouziva accountType:
+#   'atlassian' = realny uzivatel
+#   'app'       = aplikace/integrace (Automation for Jira, GitHub, Slack...)
+#   'customer'  = customer portal user (Jira Service Management)
+ALLOWED_ACCOUNT_TYPES = {'atlassian'}
+
+
 def extract_comments(issue_data: dict) -> str:
     comments = issue_data.get('fields', {}).get('comment', {}).get('comments', [])
     if not comments:
         return ''
     lines = []
-    BOT_PREFIXES = ('🤖', '⚠️ AK byla pregenerovana', '⚠️ AK přegenerována')
     for c in comments:
-        author = c.get('author', {}).get('displayName', 'Neznamy')
+        author_obj = c.get('author', {}) or {}
+        author = author_obj.get('displayName', 'Neznamy')
+        account_type = author_obj.get('accountType', '')
         body = extract_text_from_adf(c.get('body'))
         if not body.strip():
             continue
-        # Preskoc komentare od bota — audit trail
+        # Preskoc komentare od aplikaci/system uzivatelu (Automation for Jira, atd.)
+        if account_type and account_type not in ALLOWED_ACCOUNT_TYPES:
+            print(f'[AC] Preskakuji komentar od {author} (accountType={account_type})')
+            continue
+        # Preskoc komentare od naseho bota — audit trail
         if any(body.strip().startswith(p) for p in BOT_PREFIXES):
             print(f'[AC] Preskakuji bot komentar od {author}')
             continue
