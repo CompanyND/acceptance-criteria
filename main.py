@@ -143,8 +143,8 @@ async def call_claude(system_prompt: str, user_prompt: str, images: list[dict] |
     content.append({'type': 'text', 'text': user_prompt})
 
     payload = {
-        'model': 'claude-sonnet-4-20250514',
-        'max_tokens': 2048,
+        'model': 'claude-sonnet-4-6',
+        'max_tokens': 8192,
         'system': system_prompt,
         'messages': [{'role': 'user', 'content': content}],
     }
